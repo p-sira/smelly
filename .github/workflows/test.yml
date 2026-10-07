@@ -23,6 +23,14 @@ jobs:
 
     steps:
       - uses: actions/checkout@v7
+      - name: Cache cargo
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-test-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
       - name: Run clippy
         run: cargo clippy
       - name: Test
@@ -37,7 +45,7 @@ jobs:
       - name: Install no_std target
         run: rustup target add thumbv7m-none-eabi
       - name: Cache cargo
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
