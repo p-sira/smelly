@@ -1,0 +1,40 @@
+[package]
+name = "smelly"
+version = "0.1.0"
+edition = "2024"
+
+authors = ["Sira Pornsiriprasert <code@psira.me>"]
+documentation = "https://docs.rs/smelly"
+homepage = "https://github.com/p-sira/smelly"
+repository = "https://github.com/p-sira/smelly"
+license = "BSD-3-Clause"
+
+description = "Performant Kalman filter implementation and its variants, like Extended Kalman (EKF) and Unscented Kalman Filters (UKF)."
+keywords = ["kalman", "filter", "estimation", "tracking", "sensor-fusion"]
+categories = ["algorithms", "mathematics", "no-std", "science", "simulation"]
+
+include = ["/src", "/LICENSE"]
+
+[dependencies]
+getset = "0.1.7"
+kalman_filters = { version = "1.0.1", optional = true }
+nalgebra = { version = "0.35", default-features = false, features = [
+    "alloc",
+    "libm",
+] }
+
+[features]
+comparison = ["dep:kalman_filters"]
+
+[dev-dependencies]
+criterion = "0.7"
+nalgebra = { version = "0.35", default-features = false, features = ["macros"] }
+
+[[bench]]
+name = "kalman"
+harness = false
+
+[[bench]]
+name = "comparison"
+harness = false
+required-features = ["comparison"]
