@@ -13,6 +13,12 @@ pub enum FilterError {
         /// Supplied vector length or matrix shape.
         actual: String,
     },
+    /// Particle samples must have nonzero dimensions and finite components.
+    InvalidParticles,
+    /// Likelihoods must define a finite, nonzero posterior probability.
+    InvalidParticleWeights,
+    /// A systematic resampling offset must lie in `[0, 1)`.
+    InvalidResamplingOffset,
     /// The innovation covariance cannot be solved.
     SingularInnovation,
     /// Sigma points require a positive-definite covariance matrix.
@@ -33,6 +39,9 @@ impl fmt::Display for FilterError {
             } => {
                 write!(f, "{name} has shape {actual}; expected {expected}")
             }
+            Self::InvalidParticles => write!(f, "particles must be nonempty and finite"),
+            Self::InvalidParticleWeights => write!(f, "invalid or all-zero particle likelihoods"),
+            Self::InvalidResamplingOffset => write!(f, "resampling offset must be in [0, 1)"),
             Self::SingularInnovation => write!(f, "innovation covariance is singular"),
             Self::NonPositiveDefiniteCovariance => {
                 write!(f, "covariance matrix is not positive definite")
