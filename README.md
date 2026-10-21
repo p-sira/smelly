@@ -15,6 +15,7 @@ Your smelly Unscented Kalman Filter implementation and more.
     <a href="https://docs.rs/smelly">
         <img src="https://img.shields.io/badge/Docs-docs.rs-blue" alt="Documentation">
     </a>
+    <a href="https://app.codspeed.io/p-sira/smelly?utm_source=badge"><img src="https://img.shields.io/endpoint?url=https://codspeed.io/badge.json" alt="CodSpeed"/></a>
 </p>
 
 ```rust
@@ -56,6 +57,8 @@ Run the comparison on your hardware:
 ```sh
 cargo bench --bench comparison --features comparison
 ```
+
+Benchmarks are also tracked continuously in CI with [CodSpeed](https://app.codspeed.io/p-sira/smelly).
 
 ## Testing
 

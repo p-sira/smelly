@@ -27,7 +27,7 @@ nalgebra = { version = "0.35", default-features = false, features = [
 comparison = ["dep:kalman_filters"]
 
 [dev-dependencies]
-criterion = "0.7"
+criterion = { version = "5.0.3", package = "codspeed-criterion-compat" }
 nalgebra = { version = "0.35", default-features = false, features = ["macros"] }
 
 [[bench]]
