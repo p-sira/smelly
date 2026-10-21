@@ -1,0 +1,7 @@
+# Changelog
+
+## 0.2.0 - 2026-10-21
+
+### Added
+
+- `ParticleFilter` with stable log weights, effective sample size, posterior  moments, and systematic resampling. Reusable buffers for prediction, likelihood updates, and resampling without internal allocations after construction.

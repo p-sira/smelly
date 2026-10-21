@@ -8,11 +8,13 @@ use alloc::format;
 mod error;
 mod extended;
 mod kalman;
+mod particle;
 mod unscented;
 
 pub use error::FilterError;
 pub use extended::ExtendedKalmanFilter;
 pub use kalman::KalmanFilter;
+pub use particle::ParticleFilter;
 pub use unscented::{MerweScaledSigmaPoints, UnscentedKalmanFilter};
 
 use nalgebra::{DMatrix, DVector, RealField};
