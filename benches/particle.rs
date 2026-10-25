@@ -52,7 +52,7 @@ fn compare(c: &mut Criterion) {
         } else {
             "particle/predict_update"
         });
-        for count in [128, 1024, 8192] {
+        for count in [128, 512, 1024] {
             let samples = DMatrix::from_fn(4, count, |row, i| (i as f64 * 0.1 + row as f64).sin());
             let filter = ParticleFilter::new(samples).unwrap();
             group.bench_with_input(BenchmarkId::new("smelly", count), &count, |b, _| {
@@ -117,8 +117,8 @@ fn compare(c: &mut Criterion) {
             );
         }
         static_cycle::<128>(&mut group, resample);
+        static_cycle::<512>(&mut group, resample);
         static_cycle::<1024>(&mut group, resample);
-        static_cycle::<8192>(&mut group, resample);
         group.finish();
     }
 }

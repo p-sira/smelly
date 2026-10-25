@@ -1,19 +1,27 @@
 use std::alloc::{GlobalAlloc, Layout, System};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::cell::Cell;
 
 use nalgebra::DMatrix;
 use smelly::ParticleFilter;
 
 struct CountingAllocator;
-static TRACK: AtomicBool = AtomicBool::new(false);
-static ALLOCATIONS: AtomicUsize = AtomicUsize::new(0);
+thread_local! {
+    static ALLOCATIONS: Cell<Option<usize>> = const { Cell::new(None) };
+}
+
+fn record_allocation() {
+    // Ignore allocations on other threads and during thread-local teardown.
+    let _ = ALLOCATIONS.try_with(|count| {
+        if let Some(current) = count.get() {
+            count.set(Some(current + 1));
+        }
+    });
+}
 
 // Forward allocations unchanged, counting only the measured filter operations.
 unsafe impl GlobalAlloc for CountingAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        if TRACK.load(Ordering::Relaxed) {
-            ALLOCATIONS.fetch_add(1, Ordering::Relaxed);
-        }
+        record_allocation();
         unsafe { System.alloc(layout) }
     }
 
@@ -22,9 +30,7 @@ unsafe impl GlobalAlloc for CountingAllocator {
     }
 
     unsafe fn realloc(&self, pointer: *mut u8, layout: Layout, size: usize) -> *mut u8 {
-        if TRACK.load(Ordering::Relaxed) {
-            ALLOCATIONS.fetch_add(1, Ordering::Relaxed);
-        }
+        record_allocation();
         unsafe { System.realloc(pointer, layout, size) }
     }
 }
@@ -38,8 +44,7 @@ fn predict_update_and_resample_allocate_nothing_after_construction() {
         (i as f64 * 0.1 + row as f64).sin()
     }))
     .unwrap();
-    ALLOCATIONS.store(0, Ordering::Relaxed);
-    TRACK.store(true, Ordering::Relaxed);
+    ALLOCATIONS.set(Some(0));
     for _ in 0..10 {
         filter.predict(|x, out| out[0] = x[0] + 0.1 * x[2]).unwrap();
         filter.update(|x| (-0.5 * x[0] * x[0]).exp()).unwrap();
@@ -82,6 +87,31 @@ fn predict_update_and_resample_allocate_nothing_after_construction() {
             std::hint::black_box(particles.covariance());
         }
     }
-    TRACK.store(false, Ordering::Relaxed);
-    assert_eq!(ALLOCATIONS.load(Ordering::Relaxed), 0);
+    assert_eq!(ALLOCATIONS.replace(None), Some(0));
+}
+
+#[test]
+fn allocation_tracking_counts_only_the_current_thread() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    let start = AtomicBool::new(false);
+    let done = AtomicBool::new(false);
+    std::thread::scope(|scope| {
+        let worker = scope.spawn(|| {
+            while !start.load(Ordering::Acquire) {
+                std::hint::spin_loop();
+            }
+            std::hint::black_box(Box::new(42));
+            done.store(true, Ordering::Release);
+        });
+        ALLOCATIONS.set(Some(0));
+        start.store(true, Ordering::Release);
+        while !done.load(Ordering::Acquire) {
+            std::hint::spin_loop();
+        }
+        std::hint::black_box(Box::new(42));
+        let allocations = ALLOCATIONS.replace(None);
+        worker.join().unwrap();
+        assert_eq!(allocations, Some(1));
+    });
 }

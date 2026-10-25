@@ -131,10 +131,8 @@ Ryzen 5 4600H and rustc 1.99.1, comparing `kalman_filters` 1.0.1:
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | Predict/update | 128 | 3.02 µs | 2.62 µs | 6.41 µs | 2.12× | 2.45× |
 | Predict/update | 1,024 | 23.39 µs | 20.96 µs | 49.38 µs | 2.11× | 2.36× |
-| Predict/update | 8,192 | 184.08 µs | 164.73 µs | 387.26 µs | 2.10× | 2.35× |
 | Predict/update/resample | 128 | 3.41 µs | 3.00 µs | 10.94 µs | 3.21× | 3.65× |
 | Predict/update/resample | 1,024 | 27.55 µs | 23.96 µs | 84.03 µs | 3.05× | 3.51× |
-| Predict/update/resample | 8,192 | 216.14 µs | 194.24 µs | 669.16 µs | 3.10× | 3.45× |
 
 Each cycle starts with identical samples and uniform weights, uses the same
 motion and likelihood functions, and excludes setup and destruction. Process
@@ -144,6 +142,9 @@ performs systematic resampling once per cycle; smelly uses a supplied offset,
 while the reference draws its offset internally. Random process noise generation
 and posterior moment calculations are outside this comparison. Results depend
 on hardware and workload.
+
+Benchmarks cover 128, 512, and 1,024 particles. Timings for 512 particles are
+not included above.
 
 Reproduce with Criterion (30 samples, 1-second warmup, 3-second measurement):
 
