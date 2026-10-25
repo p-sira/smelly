@@ -33,6 +33,67 @@ fn log_weights_retain_information_after_linear_underflow() {
 }
 
 #[test]
+fn linear_updates_match_log_updates_at_extreme_scales() {
+    for scale in [f64::from_bits(1), f64::MIN_POSITIVE, 1.0, f64::MAX] {
+        let mut linear = ParticleFilter::<f64>::new(dmatrix![0.0, 1.0, 2.0]).unwrap();
+        let mut logarithmic = linear.clone();
+        for _ in 0..3 {
+            let likelihood = |x: &[f64]| scale * ((x[0] + 1.0) / 4.0);
+            linear.update(likelihood).unwrap();
+            logarithmic
+                .update_log_likelihood(|x| likelihood(x).ln())
+                .unwrap();
+            for (actual, expected) in linear.weights().iter().zip(logarithmic.weights()) {
+                assert!((actual - expected).abs() < 1e-12);
+            }
+        }
+    }
+
+    let mut linear = ParticleFilter::<f64>::new(dmatrix![0.0, 1.0]).unwrap();
+    linear
+        .update_log_likelihood(|x| -750.0 * (1.0 - x[0]))
+        .unwrap();
+    assert_eq!(linear.weights()[0], 0.0);
+    let mut logarithmic = linear.clone();
+    let likelihood = |x: &[f64]| if x[0] == 0.0 { 1.0 } else { f64::from_bits(1) };
+    linear.update(likelihood).unwrap();
+    logarithmic
+        .update_log_likelihood(|x| likelihood(x).ln())
+        .unwrap();
+    assert!(linear.weights()[0] > 0.0);
+    assert_eq!(linear.weights(), logarithmic.weights());
+}
+
+#[test]
+fn f32_linear_updates_handle_subnormal_likelihoods() {
+    let mut filter = ParticleFilter::<f32>::new(dmatrix![0.0, 1.0]).unwrap();
+    let mut calls = 0;
+    filter
+        .update(|_| {
+            calls += 1;
+            f32::from_bits(1)
+        })
+        .unwrap();
+    assert_eq!(calls, 2);
+    assert_eq!(filter.weights(), &[0.5, 0.5]);
+}
+
+#[test]
+fn failed_linear_update_preserves_retained_log_weights_for_retry() {
+    let mut filter = ParticleFilter::<f64>::new(dmatrix![0.0, 1.0, 2.0]).unwrap();
+    filter.update(|x| x[0] + 1.0).unwrap();
+    let mut expected = filter.clone();
+    assert_eq!(
+        filter.update(|x| if x[0] == 2.0 { f64::NAN } else { 0.0 }),
+        Err(FilterError::InvalidParticleWeights)
+    );
+    assert_eq!(filter.weights(), expected.weights());
+    filter.update_log_likelihood(|x| x[0]).unwrap();
+    expected.update_log_likelihood(|x| x[0]).unwrap();
+    assert_eq!(filter.weights(), expected.weights());
+}
+
+#[test]
 fn invalid_inputs_preserve_posterior_and_allow_retry() {
     for matrix in [
         DMatrix::<f64>::zeros(0, 2),
@@ -120,7 +181,6 @@ fn gaussian_posterior_matches_analytic_solution() {
     assert!((filter.covariance()[(0, 0)] - 0.2).abs() < 1e-12);
 }
 
-#[cfg(feature = "comparison")]
 #[test]
 fn matches_reference_over_repeated_nonlinear_updates() {
     use kalman_filters::ParticleFilterBuilder;

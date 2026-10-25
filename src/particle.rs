@@ -1,4 +1,5 @@
 use alloc::vec::Vec;
+use getset::Getters;
 use nalgebra::{DMatrix, DVector, RealField};
 
 use crate::FilterError;
@@ -8,9 +9,13 @@ use crate::FilterError;
 /// Callers supply initial samples, process noise in [`Self::predict`], and a
 /// uniform random value for systematic resampling. No RNG or distribution is
 /// imposed, so seeded simulations and `no_std` applications use the same API.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Getters)]
 pub struct ParticleFilter<T: RealField = f64> {
+    /// State samples, one per column.
+    #[getset(get = "pub")]
     particles: DMatrix<T>,
+    /// Normalized posterior weights.
+    #[getset(get = "pub")]
     weights: Vec<T>,
     log_weights: Vec<T>,
     particle_workspace: DMatrix<T>,
@@ -36,16 +41,6 @@ impl<T: RealField + Copy> ParticleFilter<T> {
             log_weights: alloc::vec![weight.ln(); count],
             weight_workspace: alloc::vec![T::zero(); count],
         })
-    }
-
-    /// State samples, one per column.
-    pub fn particles(&self) -> &DMatrix<T> {
-        &self.particles
-    }
-
-    /// Normalized posterior weights.
-    pub fn weights(&self) -> &[T] {
-        &self.weights
     }
 
     /// Propagates each sample into a reusable output slice of the same length.
@@ -79,14 +74,41 @@ impl<T: RealField + Copy> ParticleFilter<T> {
     where
         F: FnMut(&[T]) -> T,
     {
-        self.update_weights(|state| {
+        let negative_infinity = T::zero().ln();
+        // A conservative normal-range threshold, available for any RealField.
+        let minimum = T::max_value()
+            .map(|maximum| T::one() / maximum.sqrt())
+            .unwrap_or_else(T::one);
+        let mut maximum = negative_infinity;
+        let mut sum = T::zero();
+        let mut reliable = true;
+        for ((((state, prior), log_prior), log), weight) in self
+            .particles
+            .as_slice()
+            .chunks_exact(self.particles.nrows())
+            .zip(&self.weights)
+            .zip(&self.log_weights)
+            .zip(&mut self.weight_workspace)
+            .zip(self.particle_workspace.as_mut_slice())
+        {
             let value = likelihood(state);
             if value < T::zero() || !value.is_finite() {
-                Err(FilterError::InvalidParticleWeights)
-            } else {
-                Ok(value.ln())
+                return Err(FilterError::InvalidParticleWeights);
             }
-        })
+            *log = *log_prior + value.ln();
+            maximum = maximum.max(*log);
+            *weight = *prior * value;
+            sum += *weight;
+            // Subnormal products or priors can lose relative precision. Retained
+            // log weights also allow a previously underflowed sample to recover.
+            reliable &= (*prior >= minimum && *weight >= minimum)
+                || value == T::zero()
+                || *log_prior == negative_infinity;
+        }
+        self.normalize_weights(
+            maximum,
+            (reliable && sum.is_finite() && sum > T::zero()).then_some(sum),
+        )
     }
 
     /// Adds log likelihoods using log-sum-exp normalization.
@@ -96,13 +118,6 @@ impl<T: RealField + Copy> ParticleFilter<T> {
     pub fn update_log_likelihood<F>(&mut self, mut log_likelihood: F) -> Result<(), FilterError>
     where
         F: FnMut(&[T]) -> T,
-    {
-        self.update_weights(|state| Ok(log_likelihood(state)))
-    }
-
-    fn update_weights<F>(&mut self, mut log_likelihood: F) -> Result<(), FilterError>
-    where
-        F: FnMut(&[T]) -> Result<T, FilterError>,
     {
         let negative_infinity = T::zero().ln();
         let mut maximum = negative_infinity;
@@ -114,7 +129,7 @@ impl<T: RealField + Copy> ParticleFilter<T> {
             .zip(&self.log_weights)
             .zip(&mut self.weight_workspace)
         {
-            let likelihood = log_likelihood(state)?;
+            let likelihood = log_likelihood(state);
             if !likelihood.is_finite() && likelihood != negative_infinity {
                 return Err(FilterError::InvalidParticleWeights);
             }
@@ -123,20 +138,35 @@ impl<T: RealField + Copy> ParticleFilter<T> {
                 maximum = *output;
             }
         }
+        self.normalize_weights(maximum, None)
+    }
+
+    fn normalize_weights(
+        &mut self,
+        mut maximum: T,
+        linear_sum: Option<T>,
+    ) -> Result<(), FilterError> {
         if !maximum.is_finite() {
             return Err(FilterError::InvalidParticleWeights);
         }
-        let mut sum = T::zero();
-        // Reuse the inactive particle buffer for candidate linear weights.
-        for (log, weight) in self
-            .weight_workspace
-            .iter()
-            .zip(self.particle_workspace.as_mut_slice())
-        {
-            *weight = (*log - maximum).exp();
-            sum += *weight;
-        }
+        let sum = if let Some(sum) = linear_sum {
+            maximum = T::zero();
+            sum
+        } else {
+            let mut sum = T::zero();
+            // Reuse the inactive particle buffer for candidate linear weights.
+            for (log, weight) in self
+                .weight_workspace
+                .iter()
+                .zip(self.particle_workspace.as_mut_slice())
+            {
+                *weight = (*log - maximum).exp();
+                sum += *weight;
+            }
+            sum
+        };
         let log_sum = sum.ln();
+        let inverse_sum = T::one() / sum;
         for ((log, candidate), (weight, unnormalized)) in
             self.log_weights.iter_mut().zip(&self.weight_workspace).zip(
                 self.weights
@@ -145,7 +175,7 @@ impl<T: RealField + Copy> ParticleFilter<T> {
             )
         {
             *log = (*candidate - maximum) - log_sum;
-            *weight = *unnormalized / sum;
+            *weight = *unnormalized * inverse_sum;
         }
         Ok(())
     }
