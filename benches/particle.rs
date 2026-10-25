@@ -2,9 +2,13 @@
 //! particle filters with identical initial samples, motion, and likelihoods.
 //! Setup and destruction are excluded with `iter_batched_ref`. The second
 //! cycle group explicitly performs one systematic resampling with a fixed offset.
+//! Local runs also compare kalman-filter-rs, which draws its offset internally;
+//! process noise and automatic resampling are disabled for that reference.
 
 use core::hint::black_box;
 use criterion::{BatchSize, BenchmarkId, Criterion, criterion_group, criterion_main};
+#[cfg(not(codspeed))]
+use kalman_filters::ParticleFilterBuilder;
 use nalgebra::{DMatrix, SMatrix};
 use smelly::{ParticleFilter, SParticleFilter};
 
@@ -70,6 +74,47 @@ fn compare(c: &mut Criterion) {
                     BatchSize::LargeInput,
                 );
             });
+            #[cfg(not(codspeed))]
+            group.bench_with_input(
+                BenchmarkId::new("kalman-filter-rs", count),
+                &count,
+                |b, _| {
+                    b.iter_batched_ref(
+                        || {
+                            let mut reference = ParticleFilterBuilder::new(4, count)
+                                .initial_mean(vec![0.0; 4])
+                                .initial_std(vec![0.0; 4])
+                                .process_noise_std(vec![0.0; 4])
+                                .measurement_noise_std(vec![1.0; 2])
+                                .dt(0.1)
+                                .ess_threshold(0.0)
+                                .build()
+                                .unwrap();
+                            for (particle, column) in reference
+                                .particles
+                                .iter_mut()
+                                .zip(filter.particles().column_iter())
+                            {
+                                particle.state.copy_from_slice(column.as_slice());
+                            }
+                            reference
+                        },
+                        |filter| {
+                            filter.predict(|x, dt| {
+                                vec![x[0] + dt * x[2], x[1] + dt * x[3], x[2], x[3]]
+                            });
+                            filter
+                                .update(&[0.0, 0.0], |x, _| likelihood(black_box(x)))
+                                .unwrap();
+                            if resample {
+                                filter.resample().unwrap();
+                            }
+                            black_box(filter);
+                        },
+                        BatchSize::LargeInput,
+                    );
+                },
+            );
         }
         static_cycle::<128>(&mut group, resample);
         static_cycle::<1024>(&mut group, resample);

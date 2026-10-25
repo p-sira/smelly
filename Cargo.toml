@@ -38,3 +38,6 @@ harness = false
 [[bench]]
 name = "particle"
 harness = false
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(codspeed)"] }

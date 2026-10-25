@@ -156,7 +156,7 @@ Particle tests check exact discrete Bayes weights, an analytic Gaussian
 posterior, repeated nonlinear updates against the reference library, underflow
 recovery, `f32` accuracy, systematic resampling, and zero allocations in the core
 cycle. Run the reference comparison tests with `cargo test`.
-Benchmarks are also tracked continuously in CI with [CodSpeed](https://app.codspeed.io/p-sira/smelly).
+Smelly's benchmarks are also tracked continuously in CI with [CodSpeed](https://app.codspeed.io/p-sira/smelly).
 
 ## Testing
 
