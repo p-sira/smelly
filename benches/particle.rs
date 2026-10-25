@@ -7,11 +7,40 @@
 use core::hint::black_box;
 use criterion::{BatchSize, BenchmarkId, Criterion, criterion_group, criterion_main};
 use kalman_filters::ParticleFilterBuilder;
-use nalgebra::DMatrix;
-use smelly::ParticleFilter;
+use nalgebra::{DMatrix, SMatrix};
+use smelly::{ParticleFilter, SParticleFilter};
 
 fn likelihood(state: &[f64]) -> f64 {
     (-0.5 * (state[0] * state[0] + state[1] * state[1])).exp()
+}
+
+fn static_cycle<const P: usize>(
+    group: &mut criterion::BenchmarkGroup<'_, criterion::measurement::WallTime>,
+    resample: bool,
+) {
+    let filter = SParticleFilter::<f64, 4, P>::new(SMatrix::from_fn(|row, i| {
+        (i as f64 * 0.1 + row as f64).sin()
+    }))
+    .unwrap();
+    group.bench_function(BenchmarkId::new("smelly_static", P), |b| {
+        b.iter_batched_ref(
+            || filter.clone(),
+            |filter| {
+                filter
+                    .predict(|x, out| {
+                        out[0] = x[0] + 0.1 * x[2];
+                        out[1] = x[1] + 0.1 * x[3];
+                    })
+                    .unwrap();
+                filter.update(|x| likelihood(black_box(x))).unwrap();
+                if resample {
+                    filter.resample(black_box(0.37)).unwrap();
+                }
+                black_box(filter);
+            },
+            BatchSize::LargeInput,
+        );
+    });
 }
 
 fn compare(c: &mut Criterion) {
@@ -82,6 +111,9 @@ fn compare(c: &mut Criterion) {
                 },
             );
         }
+        static_cycle::<128>(&mut group, resample);
+        static_cycle::<1024>(&mut group, resample);
+        static_cycle::<8192>(&mut group, resample);
         group.finish();
     }
 }

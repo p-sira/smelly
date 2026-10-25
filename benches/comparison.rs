@@ -6,8 +6,11 @@ use kalman_filters::{
     KalmanFilterBuilder as ReferenceKalmanBuilder, NonlinearSystem,
     UnscentedKalmanFilterBuilder as ReferenceUnscentedBuilder,
 };
-use nalgebra::{DMatrix, DVector};
-use smelly::{ExtendedKalmanFilter, KalmanFilter, MerweScaledSigmaPoints, UnscentedKalmanFilter};
+use nalgebra::{DMatrix, DVector, SMatrix, SVector};
+use smelly::{
+    ExtendedKalmanFilter, KalmanFilter, MerweScaledSigmaPoints, SExtendedKalmanFilter,
+    SKalmanFilter, SUnscentedKalmanFilter, UnscentedKalmanFilter,
+};
 
 const STATE_DIM: usize = 4;
 const MEASUREMENT_DIM: usize = 2;
@@ -159,6 +162,9 @@ fn identity_vec(size: usize, scale: f64) -> Vec<f64> {
 
 fn compare(c: &mut Criterion) {
     let measurement = DVector::from_vec(vec![1.0, 1.0]);
+    let static_measurement = SVector::<f64, 2>::repeat(1.0);
+    let f = SMatrix::<f64, 4, 4>::from_row_slice(&transition_vec(DT));
+    let h = SMatrix::<f64, 2, 4>::from_row_slice(&observation_vec());
     let reference_measurement = [1.0, 1.0];
 
     let mut group = c.benchmark_group("filter_type/linear");
@@ -167,6 +173,21 @@ fn compare(c: &mut Criterion) {
         b.iter(|| {
             filter.predict().unwrap();
             black_box(filter.update(black_box(&measurement)).unwrap());
+        });
+    });
+    let mut filter = SKalmanFilter::<f64, 4, 2>::new();
+    filter.set_transition(f).unwrap();
+    filter.set_measurement(h).unwrap();
+    filter
+        .set_process_noise(SMatrix::identity() * 0.001)
+        .unwrap();
+    filter
+        .set_measurement_noise(SMatrix::identity() * 0.1)
+        .unwrap();
+    group.bench_function("smelly_static", |b| {
+        b.iter(|| {
+            filter.predict().unwrap();
+            black_box(filter.update(black_box(&static_measurement)).unwrap());
         });
     });
     let mut filter = reference_kf();
@@ -190,6 +211,24 @@ fn compare(c: &mut Criterion) {
                         |state| DVector::from_vec(vec![state[0], state[1]]),
                         |_| observation(),
                     )
+                    .unwrap(),
+            );
+        });
+    });
+    let mut filter = SExtendedKalmanFilter::<f64, 4, 2>::new();
+    filter.set_transition(f).unwrap();
+    filter
+        .set_process_noise(SMatrix::identity() * 0.001)
+        .unwrap();
+    filter
+        .set_measurement_noise(SMatrix::identity() * 0.1)
+        .unwrap();
+    group.bench_function("smelly_static", |b| {
+        b.iter(|| {
+            filter.predict().unwrap();
+            black_box(
+                filter
+                    .update(black_box(&static_measurement), |x| h * x, |_| h)
                     .unwrap(),
             );
         });
@@ -222,6 +261,24 @@ fn compare(c: &mut Criterion) {
                     .update(black_box(&measurement), |state| {
                         DVector::from_vec(vec![state[0], state[1]])
                     })
+                    .unwrap(),
+            );
+        });
+    });
+    let mut filter =
+        SUnscentedKalmanFilter::<f64, 4, 2>::new(MerweScaledSigmaPoints::new(0.1, 2.0, 0.0));
+    filter
+        .set_process_noise(SMatrix::identity() * 0.001)
+        .unwrap();
+    filter
+        .set_measurement_noise(SMatrix::identity() * 0.1)
+        .unwrap();
+    group.bench_function("smelly_static", |b| {
+        b.iter(|| {
+            filter.predict(|x| f * x).unwrap();
+            black_box(
+                filter
+                    .update(black_box(&static_measurement), |x| h * x)
                     .unwrap(),
             );
         });

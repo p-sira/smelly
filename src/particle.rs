@@ -1,6 +1,7 @@
-use alloc::vec::Vec;
 use getset::Getters;
-use nalgebra::{DMatrix, DVector, RealField};
+use nalgebra::{
+    Const, DefaultAllocator, Dim, Dyn, OMatrix, OVector, RealField, allocator::Allocator,
+};
 
 use crate::FilterError;
 
@@ -10,40 +11,51 @@ use crate::FilterError;
 /// uniform random value for systematic resampling. No RNG or distribution is
 /// imposed, so seeded simulations and `no_std` applications use the same API.
 #[derive(Debug, Clone, Getters)]
-pub struct ParticleFilter<T: RealField = f64> {
+pub struct ParticleFilter<T: RealField = f64, R: Dim = Dyn, C: Dim = Dyn>
+where
+    DefaultAllocator: Allocator<R, C> + Allocator<C> + Allocator<R> + Allocator<R, R>,
+{
     /// State samples, one per column.
     #[getset(get = "pub")]
-    particles: DMatrix<T>,
-    weights: Vec<T>,
-    log_weights: Vec<T>,
-    particle_workspace: DMatrix<T>,
-    weight_workspace: Vec<T>,
+    particles: OMatrix<T, R, C>,
+    weights: OVector<T, C>,
+    log_weights: OVector<T, C>,
+    particle_workspace: OMatrix<T, R, C>,
+    weight_workspace: OVector<T, C>,
 }
 
-impl<T: RealField + Copy> ParticleFilter<T> {
+/// Fixed-size particle filter with inline state samples and weight buffers.
+/// `N` is the state dimension and `P` is the particle count.
+pub type SParticleFilter<T, const N: usize, const P: usize> = ParticleFilter<T, Const<N>, Const<P>>;
+
+impl<T: RealField + Copy, R: Dim, C: Dim> ParticleFilter<T, R, C>
+where
+    DefaultAllocator: Allocator<R, C> + Allocator<C> + Allocator<R> + Allocator<R, R>,
+{
     /// Creates uniformly weighted particles. Each column is one state sample.
     /// Both dimensions must be nonzero and every component must be finite.
-    pub fn new(particles: DMatrix<T>) -> Result<Self, FilterError> {
+    pub fn new(particles: OMatrix<T, R, C>) -> Result<Self, FilterError> {
         if particles.nrows() == 0 || particles.ncols() == 0 {
             return Err(FilterError::InvalidParticles);
         }
         if !particles.iter().all(|x| x.is_finite()) {
             return Err(FilterError::InvalidParticles);
         }
+        let (rows, columns) = particles.shape_generic();
         let count = particles.ncols();
         let weight = T::one() / T::from_usize(count).ok_or(FilterError::InvalidParticles)?;
         Ok(Self {
-            particle_workspace: DMatrix::zeros(particles.nrows(), count),
+            particle_workspace: OMatrix::zeros_generic(rows, columns),
             particles,
-            weights: alloc::vec![weight; count],
-            log_weights: alloc::vec![weight.ln(); count],
-            weight_workspace: alloc::vec![T::zero(); count],
+            weights: OVector::from_element_generic(columns, Const::<1>, weight),
+            log_weights: OVector::from_element_generic(columns, Const::<1>, weight.ln()),
+            weight_workspace: OVector::zeros_generic(columns, Const::<1>),
         })
     }
 
     /// Normalized posterior weights.
     pub fn weights(&self) -> &[T] {
-        &self.weights
+        self.weights.as_slice()
     }
 
     /// Propagates each sample into a reusable output slice of the same length.
@@ -89,9 +101,9 @@ impl<T: RealField + Copy> ParticleFilter<T> {
             .particles
             .as_slice()
             .chunks_exact(self.particles.nrows())
-            .zip(&self.weights)
-            .zip(&self.log_weights)
-            .zip(&mut self.weight_workspace)
+            .zip(self.weights.as_slice().iter())
+            .zip(self.log_weights.as_slice().iter())
+            .zip(self.weight_workspace.as_mut_slice().iter_mut())
             .zip(self.particle_workspace.as_mut_slice())
         {
             let value = likelihood(state);
@@ -129,8 +141,8 @@ impl<T: RealField + Copy> ParticleFilter<T> {
             .particles
             .as_slice()
             .chunks_exact(dim)
-            .zip(&self.log_weights)
-            .zip(&mut self.weight_workspace)
+            .zip(self.log_weights.as_slice().iter())
+            .zip(self.weight_workspace.as_mut_slice().iter_mut())
         {
             let likelihood = log_likelihood(state);
             if !likelihood.is_finite() && likelihood != negative_infinity {
@@ -170,9 +182,14 @@ impl<T: RealField + Copy> ParticleFilter<T> {
         };
         let log_sum = sum.ln();
         let inverse_sum = T::one() / sum;
-        for ((log, candidate), (weight, unnormalized)) in
-            self.log_weights.iter_mut().zip(&self.weight_workspace).zip(
+        for ((log, candidate), (weight, unnormalized)) in self
+            .log_weights
+            .as_mut_slice()
+            .iter_mut()
+            .zip(self.weight_workspace.as_slice().iter())
+            .zip(
                 self.weights
+                    .as_mut_slice()
                     .iter_mut()
                     .zip(self.particle_workspace.as_slice()),
             )
@@ -185,7 +202,12 @@ impl<T: RealField + Copy> ParticleFilter<T> {
 
     /// Effective sample size, in the range `1..=particle_count` up to roundoff.
     pub fn effective_sample_size(&self) -> T {
-        T::one() / self.weights.iter().fold(T::zero(), |sum, w| sum + *w * *w)
+        T::one()
+            / self
+                .weights
+                .as_slice()
+                .iter()
+                .fold(T::zero(), |sum, w| sum + *w * *w)
     }
 
     /// Systematic resampling in linear time with no allocations.
@@ -210,26 +232,37 @@ impl<T: RealField + Copy> ParticleFilter<T> {
                 .copy_from(&self.particles.column(source));
         }
         core::mem::swap(&mut self.particles, &mut self.particle_workspace);
-        self.weights.fill(step);
-        self.log_weights.fill(step.ln());
+        self.weights.as_mut_slice().fill(step);
+        self.log_weights.as_mut_slice().fill(step.ln());
         Ok(())
     }
 
-    /// Weighted posterior mean. Allocates one state vector.
-    pub fn state(&self) -> DVector<T> {
-        let mut mean = DVector::zeros(self.particles.nrows());
-        for (state, weight) in self.particles.column_iter().zip(&self.weights) {
+    /// Weighted posterior mean. Dynamic dimensions allocate one state vector.
+    pub fn state(&self) -> OVector<T, R> {
+        let mut mean = OVector::zeros_generic(self.particles.shape_generic().0, Const::<1>);
+        for (state, weight) in self
+            .particles
+            .column_iter()
+            .zip(self.weights.as_slice().iter())
+        {
             mean.axpy(*weight, &state, T::one());
         }
         mean
     }
 
     /// Weighted population covariance (no sample-size correction).
-    pub fn covariance(&self) -> DMatrix<T> {
+    pub fn covariance(&self) -> OMatrix<T, R, R> {
         let mean = self.state();
-        let mut covariance = DMatrix::zeros(mean.len(), mean.len());
-        let mut delta = DVector::zeros(mean.len());
-        for (state, weight) in self.particles.column_iter().zip(&self.weights) {
+        let mut covariance = OMatrix::zeros_generic(
+            self.particles.shape_generic().0,
+            self.particles.shape_generic().0,
+        );
+        let mut delta = OVector::zeros_generic(self.particles.shape_generic().0, Const::<1>);
+        for (state, weight) in self
+            .particles
+            .column_iter()
+            .zip(self.weights.as_slice().iter())
+        {
             state.sub_to(&mean, &mut delta);
             covariance.ger(*weight, &delta, &delta, T::one());
         }

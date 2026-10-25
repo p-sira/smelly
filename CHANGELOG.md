@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Fixed-size `SKalmanFilter`, `SExtendedKalmanFilter`, `SUnscentedKalmanFilter`, and `SParticleFilter` with inline storage and compile-time dimensions.
+- Static filter benchmarks alongside the dynamic and reference results in the README.
+
 ## 0.2.0 - 2026-10-21
 
 ### Added
