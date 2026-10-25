@@ -15,6 +15,7 @@ Your smelly Unscented Kalman Filter implementation and more.
     <a href="https://docs.rs/smelly">
         <img src="https://img.shields.io/badge/Docs-docs.rs-blue" alt="Documentation">
     </a>
+    <a href="https://app.codspeed.io/p-sira/smelly?utm_source=badge"><img src="https://img.shields.io/endpoint?url=https://codspeed.io/badge.json" alt="CodSpeed"/></a>
 </p>
 
 ```rust
@@ -155,6 +156,7 @@ Particle tests check exact discrete Bayes weights, an analytic Gaussian
 posterior, repeated nonlinear updates against the reference library, underflow
 recovery, `f32` accuracy, systematic resampling, and zero allocations in the core
 cycle. Run the reference comparison tests with `cargo test`.
+Benchmarks are also tracked continuously in CI with [CodSpeed](https://app.codspeed.io/p-sira/smelly).
 
 ## Testing
 

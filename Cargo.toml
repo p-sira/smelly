@@ -23,7 +23,7 @@ nalgebra = { version = "0.35", default-features = false, features = [
 ] }
 
 [dev-dependencies]
-criterion = "0.7"
+criterion = { version = "5.0.3", package = "codspeed-criterion-compat" }
 kalman_filters = "1.0.1"
 nalgebra = { version = "0.35", default-features = false, features = ["macros"] }
 
