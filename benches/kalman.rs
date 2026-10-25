@@ -1,8 +1,11 @@
 use core::hint::black_box;
 
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
-use nalgebra::{DMatrix, DVector};
-use smelly::{ExtendedKalmanFilter, KalmanFilter, MerweScaledSigmaPoints, UnscentedKalmanFilter};
+use nalgebra::{Const, DMatrix, DVector, DimMin, SMatrix, SVector};
+use smelly::{
+    ExtendedKalmanFilter, KalmanFilter, MerweScaledSigmaPoints, SExtendedKalmanFilter,
+    SKalmanFilter, SUnscentedKalmanFilter, UnscentedKalmanFilter,
+};
 
 fn transition_matrix(state_dim: usize) -> DMatrix<f64> {
     let mut transition = DMatrix::identity(state_dim, state_dim);
@@ -130,5 +133,138 @@ fn unscented_cycle(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, kalman_cycle, extended_cycle, unscented_cycle);
+fn static_transition<const N: usize>() -> SMatrix<f64, N, N> {
+    SMatrix::from_fn(|row, col| {
+        if row == col {
+            1.0
+        } else if row < N / 2 && col == N / 2 + row {
+            0.1
+        } else {
+            0.0
+        }
+    })
+}
+
+fn static_measurement<const N: usize, const M: usize>() -> SMatrix<f64, M, N> {
+    SMatrix::from_fn(|row, col| if row == col { 1.0 } else { 0.0 })
+}
+
+fn static_kalman<const N: usize, const M: usize>(
+    group: &mut criterion::BenchmarkGroup<'_, criterion::measurement::WallTime>,
+) where
+    Const<M>: DimMin<Const<M>, Output = Const<M>>,
+{
+    let measurement = SVector::<f64, M>::repeat(1.0);
+    let mut filter = SKalmanFilter::<f64, N, M>::new();
+    filter.set_transition(static_transition::<N>()).unwrap();
+    filter
+        .set_process_noise(SMatrix::<f64, N, N>::identity() * 0.001)
+        .unwrap();
+    filter
+        .set_measurement(static_measurement::<N, M>())
+        .unwrap();
+    filter
+        .set_measurement_noise(SMatrix::<f64, M, M>::identity() * 0.1)
+        .unwrap();
+    group.bench_function(
+        BenchmarkId::new("predict_update_static", format!("{N}x{M}")),
+        |b| {
+            b.iter(|| {
+                filter.predict().unwrap();
+                black_box(filter.update(black_box(&measurement)).unwrap());
+            });
+        },
+    );
+}
+
+fn static_extended<const N: usize, const M: usize>(
+    group: &mut criterion::BenchmarkGroup<'_, criterion::measurement::WallTime>,
+) where
+    Const<M>: DimMin<Const<M>, Output = Const<M>>,
+{
+    let measurement = SVector::<f64, M>::repeat(1.0);
+    let h = static_measurement::<N, M>();
+    let mut filter = SExtendedKalmanFilter::<f64, N, M>::new();
+    filter.set_transition(static_transition::<N>()).unwrap();
+    filter
+        .set_process_noise(SMatrix::<f64, N, N>::identity() * 0.001)
+        .unwrap();
+    filter
+        .set_measurement_noise(SMatrix::<f64, M, M>::identity() * 0.1)
+        .unwrap();
+    group.bench_function(
+        BenchmarkId::new("predict_update_static", format!("{N}x{M}")),
+        |b| {
+            b.iter(|| {
+                filter.predict().unwrap();
+                black_box(
+                    filter
+                        .update(black_box(&measurement), |x| h * x, |_| h)
+                        .unwrap(),
+                );
+            });
+        },
+    );
+}
+
+fn static_unscented<const N: usize, const M: usize>(
+    group: &mut criterion::BenchmarkGroup<'_, criterion::measurement::WallTime>,
+) where
+    Const<M>: DimMin<Const<M>, Output = Const<M>>,
+{
+    let measurement = SVector::<f64, M>::repeat(1.0);
+    let f = static_transition::<N>();
+    let h = static_measurement::<N, M>();
+    let mut filter =
+        SUnscentedKalmanFilter::<f64, N, M>::new(MerweScaledSigmaPoints::new(0.1, 2.0, 0.0));
+    filter
+        .set_process_noise(SMatrix::<f64, N, N>::identity() * 0.001)
+        .unwrap();
+    filter
+        .set_measurement_noise(SMatrix::<f64, M, M>::identity() * 0.1)
+        .unwrap();
+    group.bench_function(
+        BenchmarkId::new("predict_update_static", format!("{N}x{M}")),
+        |b| {
+            b.iter(|| {
+                filter.predict(|x| f * x).unwrap();
+                black_box(filter.update(black_box(&measurement), |x| h * x).unwrap());
+            });
+        },
+    );
+}
+
+fn static_kalman_cycle(c: &mut Criterion) {
+    let mut group = c.benchmark_group("kalman_cycle");
+    static_kalman::<4, 2>(&mut group);
+    static_kalman::<16, 8>(&mut group);
+    static_kalman::<64, 16>(&mut group);
+    group.finish();
+}
+
+fn static_extended_cycle(c: &mut Criterion) {
+    let mut group = c.benchmark_group("extended_cycle");
+    static_extended::<4, 2>(&mut group);
+    static_extended::<16, 8>(&mut group);
+    static_extended::<64, 16>(&mut group);
+    group.finish();
+}
+
+fn static_unscented_cycle(c: &mut Criterion) {
+    let mut group = c.benchmark_group("unscented_cycle");
+    static_unscented::<4, 2>(&mut group);
+    static_unscented::<16, 8>(&mut group);
+    static_unscented::<64, 16>(&mut group);
+    group.finish();
+}
+
+criterion_group!(
+    benches,
+    kalman_cycle,
+    extended_cycle,
+    unscented_cycle,
+    static_kalman_cycle,
+    static_extended_cycle,
+    static_unscented_cycle
+);
 criterion_main!(benches);

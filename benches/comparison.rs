@@ -1,21 +1,30 @@
+//! Compare dynamic, static, and (locally only) kalman-filter-rs filters
+//! on the same 4-state constant-velocity model.
+
 use core::hint::black_box;
 
 use criterion::{Criterion, criterion_group, criterion_main};
+#[cfg(not(codspeed))]
 use kalman_filters::{
     ExtendedKalmanFilterBuilder as ReferenceExtendedBuilder, KalmanFilter as ReferenceKalmanFilter,
     KalmanFilterBuilder as ReferenceKalmanBuilder, NonlinearSystem,
     UnscentedKalmanFilterBuilder as ReferenceUnscentedBuilder,
 };
-use nalgebra::{DMatrix, DVector};
-use smelly::{ExtendedKalmanFilter, KalmanFilter, MerweScaledSigmaPoints, UnscentedKalmanFilter};
+use nalgebra::{DMatrix, DVector, SMatrix, SVector};
+use smelly::{
+    ExtendedKalmanFilter, KalmanFilter, MerweScaledSigmaPoints, SExtendedKalmanFilter,
+    SKalmanFilter, SUnscentedKalmanFilter, UnscentedKalmanFilter,
+};
 
 const STATE_DIM: usize = 4;
 const MEASUREMENT_DIM: usize = 2;
 const DT: f64 = 0.1;
 
+#[cfg(not(codspeed))]
 #[derive(Clone, Copy)]
 struct ConstantVelocity;
 
+#[cfg(not(codspeed))]
 impl NonlinearSystem<f64> for ConstantVelocity {
     fn state_transition(&self, state: &[f64], _control: Option<&[f64]>, dt: f64) -> Vec<f64> {
         vec![
@@ -85,6 +94,7 @@ fn smelly_kf() -> KalmanFilter<f64> {
     filter
 }
 
+#[cfg(not(codspeed))]
 fn reference_kf() -> ReferenceKalmanFilter<f64> {
     ReferenceKalmanBuilder::new(STATE_DIM, MEASUREMENT_DIM)
         .initial_state(vec![0.0; STATE_DIM])
@@ -109,6 +119,7 @@ fn smelly_ekf() -> ExtendedKalmanFilter<f64> {
     filter
 }
 
+#[cfg(not(codspeed))]
 fn reference_ekf() -> kalman_filters::ExtendedKalmanFilter<f64, ConstantVelocity> {
     ReferenceExtendedBuilder::new(ConstantVelocity)
         .initial_state(vec![0.0; STATE_DIM])
@@ -135,6 +146,7 @@ fn smelly_ukf() -> UnscentedKalmanFilter<f64> {
     filter
 }
 
+#[cfg(not(codspeed))]
 fn reference_ukf() -> kalman_filters::UnscentedKalmanFilter<f64, ConstantVelocity> {
     ReferenceUnscentedBuilder::new(ConstantVelocity)
         .initial_state(vec![0.0; STATE_DIM])
@@ -149,6 +161,7 @@ fn reference_ukf() -> kalman_filters::UnscentedKalmanFilter<f64, ConstantVelocit
         .unwrap()
 }
 
+#[cfg(not(codspeed))]
 fn identity_vec(size: usize, scale: f64) -> Vec<f64> {
     let mut matrix = vec![0.0; size * size];
     for index in 0..size {
@@ -159,6 +172,10 @@ fn identity_vec(size: usize, scale: f64) -> Vec<f64> {
 
 fn compare(c: &mut Criterion) {
     let measurement = DVector::from_vec(vec![1.0, 1.0]);
+    let static_measurement = SVector::<f64, 2>::repeat(1.0);
+    let f = SMatrix::<f64, 4, 4>::from_row_slice(&transition_vec(DT));
+    let h = SMatrix::<f64, 2, 4>::from_row_slice(&observation_vec());
+    #[cfg(not(codspeed))]
     let reference_measurement = [1.0, 1.0];
 
     let mut group = c.benchmark_group("filter_type/linear");
@@ -169,13 +186,31 @@ fn compare(c: &mut Criterion) {
             black_box(filter.update(black_box(&measurement)).unwrap());
         });
     });
-    let mut filter = reference_kf();
-    group.bench_function("kalman-filter-rs", |b| {
+    let mut filter = SKalmanFilter::<f64, 4, 2>::new();
+    filter.set_transition(f).unwrap();
+    filter.set_measurement(h).unwrap();
+    filter
+        .set_process_noise(SMatrix::identity() * 0.001)
+        .unwrap();
+    filter
+        .set_measurement_noise(SMatrix::identity() * 0.1)
+        .unwrap();
+    group.bench_function("smelly_static", |b| {
         b.iter(|| {
-            filter.predict();
-            filter.update(black_box(&reference_measurement)).unwrap();
+            filter.predict().unwrap();
+            black_box(filter.update(black_box(&static_measurement)).unwrap());
         });
     });
+    #[cfg(not(codspeed))]
+    {
+        let mut filter = reference_kf();
+        group.bench_function("kalman-filter-rs", |b| {
+            b.iter(|| {
+                filter.predict();
+                filter.update(black_box(&reference_measurement)).unwrap();
+            });
+        });
+    }
     group.finish();
 
     let mut group = c.benchmark_group("filter_type/extended");
@@ -194,13 +229,34 @@ fn compare(c: &mut Criterion) {
             );
         });
     });
-    let mut filter = reference_ekf();
-    group.bench_function("kalman-filter-rs", |b| {
+    let mut filter = SExtendedKalmanFilter::<f64, 4, 2>::new();
+    filter.set_transition(f).unwrap();
+    filter
+        .set_process_noise(SMatrix::identity() * 0.001)
+        .unwrap();
+    filter
+        .set_measurement_noise(SMatrix::identity() * 0.1)
+        .unwrap();
+    group.bench_function("smelly_static", |b| {
         b.iter(|| {
-            filter.predict();
-            filter.update(black_box(&reference_measurement)).unwrap();
+            filter.predict().unwrap();
+            black_box(
+                filter
+                    .update(black_box(&static_measurement), |x| h * x, |_| h)
+                    .unwrap(),
+            );
         });
     });
+    #[cfg(not(codspeed))]
+    {
+        let mut filter = reference_ekf();
+        group.bench_function("kalman-filter-rs", |b| {
+            b.iter(|| {
+                filter.predict();
+                filter.update(black_box(&reference_measurement)).unwrap();
+            });
+        });
+    }
     group.finish();
 
     let mut group = c.benchmark_group("filter_type/unscented");
@@ -226,13 +282,34 @@ fn compare(c: &mut Criterion) {
             );
         });
     });
-    let mut filter = reference_ukf();
-    group.bench_function("kalman-filter-rs", |b| {
+    let mut filter =
+        SUnscentedKalmanFilter::<f64, 4, 2>::new(MerweScaledSigmaPoints::new(0.1, 2.0, 0.0));
+    filter
+        .set_process_noise(SMatrix::identity() * 0.001)
+        .unwrap();
+    filter
+        .set_measurement_noise(SMatrix::identity() * 0.1)
+        .unwrap();
+    group.bench_function("smelly_static", |b| {
         b.iter(|| {
-            filter.predict().unwrap();
-            filter.update(black_box(&reference_measurement)).unwrap();
+            filter.predict(|x| f * x).unwrap();
+            black_box(
+                filter
+                    .update(black_box(&static_measurement), |x| h * x)
+                    .unwrap(),
+            );
         });
     });
+    #[cfg(not(codspeed))]
+    {
+        let mut filter = reference_ukf();
+        group.bench_function("kalman-filter-rs", |b| {
+            b.iter(|| {
+                filter.predict().unwrap();
+                filter.update(black_box(&reference_measurement)).unwrap();
+            });
+        });
+    }
     group.finish();
 }
 

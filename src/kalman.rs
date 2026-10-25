@@ -28,8 +28,8 @@ impl<T: RealField + Copy> KalmanFilter<T> {
     /// Creates a filter with zero state, identity covariance and noise matrices,
     /// and an identity state-transition matrix.
     ///
-    /// The measurement matrix is initialized to zero. Configure [`Self::h`]
-    /// before processing measurements.
+    /// The measurement matrix is initialized to zero. Configure it with
+    /// [`Self::set_measurement`] before processing measurements.
     ///
     /// # Example
     ///
@@ -96,8 +96,8 @@ impl<T: RealField + Copy> KalmanFilter<T> {
 
     /// Propagates the state and covariance through the linear process model.
     ///
-    /// This applies `x = F x` and `P = F P Fᵀ + Q` using [`Self::f`] and
-    /// [`Self::q`].
+    /// This applies `x = F x` and `P = F P Fᵀ + Q` using [`Self::transition`]
+    /// and [`Self::process_noise`].
     pub fn predict(&mut self) -> Result<(), FilterError> {
         linear_predict(
             &mut self.state,

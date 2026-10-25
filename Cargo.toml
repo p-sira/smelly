@@ -1,6 +1,6 @@
 [package]
 name = "smelly"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 
 authors = ["Sira Pornsiriprasert <code@psira.me>"]
@@ -9,7 +9,7 @@ homepage = "https://github.com/p-sira/smelly"
 repository = "https://github.com/p-sira/smelly"
 license = "BSD-3-Clause"
 
-description = "Performant Kalman filter implementation and its variants, like Extended Kalman (EKF) and Unscented Kalman Filters (UKF)."
+description = "Performant Kalman, Extended Kalman (EKF), Unscented Kalman (UKF), and particle filters."
 keywords = ["kalman", "filter", "estimation", "tracking", "sensor-fusion"]
 categories = ["algorithms", "mathematics", "no-std", "science", "simulation"]
 
@@ -17,17 +17,14 @@ include = ["/src", "/LICENSE"]
 
 [dependencies]
 getset = "0.1.7"
-kalman_filters = { version = "1.0.1", optional = true }
 nalgebra = { version = "0.35", default-features = false, features = [
     "alloc",
     "libm",
 ] }
 
-[features]
-comparison = ["dep:kalman_filters"]
-
 [dev-dependencies]
 criterion = { version = "5.0.3", package = "codspeed-criterion-compat" }
+kalman_filters = "1.0.1"
 nalgebra = { version = "0.35", default-features = false, features = ["macros"] }
 
 [[bench]]
@@ -37,4 +34,10 @@ harness = false
 [[bench]]
 name = "comparison"
 harness = false
-required-features = ["comparison"]
+
+[[bench]]
+name = "particle"
+harness = false
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(codspeed)"] }

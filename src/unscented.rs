@@ -4,16 +4,16 @@ use nalgebra::{DMatrix, DVector, RealField};
 
 use crate::{FilterError, replace_square, right_solve};
 
-struct SigmaWeights<T> {
+pub(crate) struct SigmaWeights<T> {
     mean_first: T,
     covariance_first: T,
     common: T,
-    scale: T,
+    pub(crate) scale: T,
 }
 
 impl<T: Copy> SigmaWeights<T> {
     #[inline]
-    fn mean(&self, index: usize) -> T {
+    pub(crate) fn mean(&self, index: usize) -> T {
         if index == 0 {
             self.mean_first
         } else {
@@ -22,7 +22,7 @@ impl<T: Copy> SigmaWeights<T> {
     }
 
     #[inline]
-    fn covariance(&self, index: usize) -> T {
+    pub(crate) fn covariance(&self, index: usize) -> T {
         if index == 0 {
             self.covariance_first
         } else {
@@ -61,7 +61,7 @@ impl<T: RealField + Copy> MerweScaledSigmaPoints<T> {
         Self { alpha, beta, kappa }
     }
 
-    fn weights(&self, n: usize) -> Result<SigmaWeights<T>, FilterError> {
+    pub(crate) fn weights(&self, n: usize) -> Result<SigmaWeights<T>, FilterError> {
         let dimension = T::from_usize(n).ok_or(FilterError::InvalidSigmaPointScaling)?;
         let alpha2 = self.alpha * self.alpha;
         let scale = alpha2 * (dimension + self.kappa);
