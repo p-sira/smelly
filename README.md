@@ -32,8 +32,37 @@ filter.update(&DVector::from_row_slice(&[1.2]))?;
 ## Features
 
 - Kalman filter (KF), Extended Kalman filter (EKF), Unscented Kalman filter (UKF), and particle filter
+- Dynamic and fixed-size variants of every filter
 - Works with `f32` and `f64`
 - `no_std` support
+
+## Static filters
+
+`SKalmanFilter<T, N, M>`, `SExtendedKalmanFilter<T, N, M>`, and
+`SUnscentedKalmanFilter<T, N, M>` use `SVector` and `SMatrix`, with state dimension
+`N` and measurement dimension `M` checked at compile time. Their constructors
+omit dimension arguments; the UKF still takes `MerweScaledSigmaPoints`.
+Configuration and callbacks otherwise follow the dynamic APIs.
+
+```rust
+use nalgebra::{SMatrix, SVector};
+use smelly::SKalmanFilter;
+
+let mut filter = SKalmanFilter::<f64, 2, 1>::new();
+filter.set_transition(SMatrix::from_row_slice(&[1.0, 1.0, 0.0, 1.0]))?;
+filter.set_measurement(SMatrix::from_row_slice(&[1.0, 0.0]))?;
+filter.predict()?;
+filter.update(&SVector::from_row_slice(&[1.2]))?;
+# Ok::<(), smelly::FilterError>(())
+```
+
+`SParticleFilter<T, N, P>` fixes both the state dimension and particle count.
+Construct it with an `SMatrix<T, N, P>` whose columns are the initial samples;
+it shares the dynamic particle filter's algorithms and slice callbacks.
+All static variants store their matrices and workspaces inline and perform no
+internal heap allocations, including particle posterior moments. Callbacks may
+allocate. Large dimensions increase stack usage, so use the dynamic variants
+when inline storage is impractical.
 
 ## Particle filter
 
@@ -70,16 +99,17 @@ can estimate the weighted posterior before introducing resampling variance.
 
 ## Performance
 
-Time per predict/update cycle for a 4-state, 2-measurement `f64` constant-velocity
+Mean time per predict/update cycle for a 4-state, 2-measurement `f64` constant-velocity
 model, measured with Criterion on an AMD Ryzen 5 4600H (rustc 1.99.1):
 
-| Filter | smelly | [kalman-filter-rs](https://github.com/destenson/kalman-filter-rs/tree/v1.0.1) | Speedup |
-| --- | ---: | ---: | ---: |
-| Linear | 507 ns | 669 ns | 1.32× |
-| Extended | 523 ns | 716 ns | 1.37× |
-| Unscented | 1.28 µs | 1.76 µs | 1.37× |
+| Filter | smelly (dynamic) | smelly (static) | [kalman-filter-rs](https://github.com/destenson/kalman-filter-rs/tree/v1.0.1) | Dynamic speedup | Static speedup |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Linear | 484 ns | 114 ns | 682 ns | 1.41× | 6.00× |
+| Extended | 516 ns | 114 ns | 722 ns | 1.40× | 6.33× |
+| Unscented | 1.27 µs | 354 ns | 1.75 µs | 1.38× | 4.96× |
 
-Speedup is reference time divided by smelly time, calculated before rounding.
+Speedups are reference time divided by the corresponding smelly time, calculated
+before rounding. All columns were measured in the same run.
 Results depend on the model and hardware. The UKFs differ: smelly regenerates
 sigma points after adding process noise; kalman-filter-rs reuses propagated
 points, so their numerical results can differ.
@@ -96,23 +126,23 @@ cargo bench --bench comparison -- \
 Mean time per cycle for a 4-state `f64` constant-velocity model on the same
 Ryzen 5 4600H and rustc 1.99.1, comparing `kalman_filters` 1.0.1:
 
-| Cycle | Particles | smelly | kalman-filter-rs | Speedup |
-| --- | ---: | ---: | ---: | ---: |
-| Predict/update | 128 | 3.04 µs | 6.35 µs | 2.09× |
-| Predict/update | 1,024 | 23.71 µs | 48.99 µs | 2.07× |
-| Predict/update | 8,192 | 187.51 µs | 390.31 µs | 2.08× |
-| Predict/update/resample | 128 | 3.55 µs | 11.02 µs | 3.11× |
-| Predict/update/resample | 1,024 | 27.76 µs | 85.18 µs | 3.07× |
-| Predict/update/resample | 8,192 | 227.15 µs | 679.03 µs | 2.99× |
+| Cycle | Particles | smelly (dynamic) | smelly (static) | kalman-filter-rs | Dynamic speedup | Static speedup |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Predict/update | 128 | 3.02 µs | 2.62 µs | 6.41 µs | 2.12× | 2.45× |
+| Predict/update | 1,024 | 23.39 µs | 20.96 µs | 49.38 µs | 2.11× | 2.36× |
+| Predict/update | 8,192 | 184.08 µs | 164.73 µs | 387.26 µs | 2.10× | 2.35× |
+| Predict/update/resample | 128 | 3.41 µs | 3.00 µs | 10.94 µs | 3.21× | 3.65× |
+| Predict/update/resample | 1,024 | 27.55 µs | 23.96 µs | 84.03 µs | 3.05× | 3.51× |
+| Predict/update/resample | 8,192 | 216.14 µs | 194.24 µs | 669.16 µs | 3.10× | 3.45× |
 
 Each cycle starts with identical samples and uniform weights, uses the same
 motion and likelihood functions, and excludes setup and destruction. Process
-noise and automatic resampling are disabled. The resampling group explicitly
+noise and automatic resampling are disabled. Static and dynamic smelly filters
+use the same callbacks and resampling offset. The resampling group explicitly
 performs systematic resampling once per cycle; smelly uses a supplied offset,
 while the reference draws its offset internally. Random process noise generation
 and posterior moment calculations are outside this comparison. Results depend
-on hardware and workload; the 95% confidence intervals for mean cycle times did
-not overlap in this run.
+on hardware and workload.
 
 Reproduce with Criterion (30 samples, 1-second warmup, 3-second measurement):
 
