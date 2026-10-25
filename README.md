@@ -60,6 +60,8 @@ if filter.effective_sample_size() < filter.weights().len() as f64 / 2.0 {
 
 `update` accepts ordinary likelihoods; `update_log_likelihood` avoids underflow
 for very small likelihoods. Both retain log weights between observations.
+Ordinary likelihood updates normalize linear products directly when they are
+well represented, falling back to log-sum-exp for extreme weights.
 Prediction, weight updates, and systematic resampling reuse buffers and allocate
 nothing internally after construction. Model callbacks may allocate; computing
 `state()` and `covariance()` allocates their results. Invalid inputs return
@@ -69,13 +71,13 @@ can estimate the weighted posterior before introducing resampling variance.
 ## Performance
 
 Time per predict/update cycle for a 4-state, 2-measurement `f64` constant-velocity
-model, measured with Criterion on an AMD Ryzen 5 4600H (rustc 1.98.1):
+model, measured with Criterion on an AMD Ryzen 5 4600H (rustc 1.99.1):
 
 | Filter | smelly | [kalman-filter-rs](https://github.com/destenson/kalman-filter-rs/tree/v1.0.1) | Speedup |
 | --- | ---: | ---: | ---: |
-| Linear | 512 ns | 687 ns | 1.34× |
-| Extended | 535 ns | 660 ns | 1.23× |
-| Unscented | 1.28 µs | 1.78 µs | 1.40× |
+| Linear | 507 ns | 669 ns | 1.32× |
+| Extended | 523 ns | 716 ns | 1.37× |
+| Unscented | 1.28 µs | 1.76 µs | 1.37× |
 
 Speedup is reference time divided by smelly time, calculated before rounding.
 Results depend on the model and hardware. The UKFs differ: smelly regenerates
@@ -85,22 +87,23 @@ points, so their numerical results can differ.
 Run the comparison on your hardware:
 
 ```sh
-cargo bench --bench comparison --features comparison
+cargo bench --bench comparison -- \
+    --warm-up-time 1 --measurement-time 3 --sample-size 30 --noplot
 ```
 
 ### Particle filter comparison
 
 Mean time per cycle for a 4-state `f64` constant-velocity model on the same
-Ryzen 5 4600H and rustc 1.98.1, comparing `kalman_filters` 1.0.1:
+Ryzen 5 4600H and rustc 1.99.1, comparing `kalman_filters` 1.0.1:
 
 | Cycle | Particles | smelly | kalman-filter-rs | Speedup |
 | --- | ---: | ---: | ---: | ---: |
-| Predict/update | 128 | 3.50 µs | 6.63 µs | 1.90× |
-| Predict/update | 1,024 | 27.27 µs | 53.56 µs | 1.96× |
-| Predict/update | 8,192 | 220.73 µs | 406.29 µs | 1.84× |
-| Predict/update/resample | 128 | 3.94 µs | 11.40 µs | 2.89× |
-| Predict/update/resample | 1,024 | 30.44 µs | 86.23 µs | 2.83× |
-| Predict/update/resample | 8,192 | 258.22 µs | 688.74 µs | 2.67× |
+| Predict/update | 128 | 3.04 µs | 6.35 µs | 2.09× |
+| Predict/update | 1,024 | 23.71 µs | 48.99 µs | 2.07× |
+| Predict/update | 8,192 | 187.51 µs | 390.31 µs | 2.08× |
+| Predict/update/resample | 128 | 3.55 µs | 11.02 µs | 3.11× |
+| Predict/update/resample | 1,024 | 27.76 µs | 85.18 µs | 3.07× |
+| Predict/update/resample | 8,192 | 227.15 µs | 679.03 µs | 2.99× |
 
 Each cycle starts with identical samples and uniform weights, uses the same
 motion and likelihood functions, and excludes setup and destruction. Process
@@ -114,14 +117,14 @@ not overlap in this run.
 Reproduce with Criterion (30 samples, 1-second warmup, 3-second measurement):
 
 ```sh
-cargo bench --bench particle --features comparison -- \
+cargo bench --bench particle -- \
     --warm-up-time 1 --measurement-time 3 --sample-size 30 --noplot
 ```
 
 Particle tests check exact discrete Bayes weights, an analytic Gaussian
 posterior, repeated nonlinear updates against the reference library, underflow
 recovery, `f32` accuracy, systematic resampling, and zero allocations in the core
-cycle. Run the reference comparison tests with `cargo test --all-features`.
+cycle. Run the reference comparison tests with `cargo test`.
 
 ## Testing
 

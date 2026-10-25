@@ -17,17 +17,14 @@ include = ["/src", "/LICENSE"]
 
 [dependencies]
 getset = "0.1.7"
-kalman_filters = { version = "1.0.1", optional = true }
 nalgebra = { version = "0.35", default-features = false, features = [
     "alloc",
     "libm",
 ] }
 
-[features]
-comparison = ["dep:kalman_filters"]
-
 [dev-dependencies]
 criterion = "0.7"
+kalman_filters = "1.0.1"
 nalgebra = { version = "0.35", default-features = false, features = ["macros"] }
 
 [[bench]]
@@ -37,9 +34,7 @@ harness = false
 [[bench]]
 name = "comparison"
 harness = false
-required-features = ["comparison"]
 
 [[bench]]
 name = "particle"
 harness = false
-required-features = ["comparison"]

@@ -85,5 +85,41 @@ fn compare(c: &mut Criterion) {
         group.finish();
     }
 }
-criterion_group!(benches, compare);
+
+fn updates(c: &mut Criterion) {
+    let mut group = c.benchmark_group("particle/update");
+    let mut filter = ParticleFilter::<f64>::new(DMatrix::from_fn(4, 1024, |row, i| {
+        (i as f64 * 0.1 + row as f64).sin()
+    }))
+    .unwrap();
+    filter.update(likelihood).unwrap();
+    for (name, scale) in [
+        ("linear", 1.0),
+        ("tiny_linear", f64::MIN_POSITIVE),
+        ("log", 1.0),
+    ] {
+        group.bench_function(name, |b| {
+            b.iter_batched_ref(
+                || filter.clone(),
+                |filter| {
+                    if name == "log" {
+                        filter
+                            .update_log_likelihood(|x| {
+                                let x = black_box(x);
+                                -0.5 * (x[0] * x[0] + x[1] * x[1])
+                            })
+                            .unwrap();
+                    } else {
+                        filter.update(|x| scale * likelihood(black_box(x))).unwrap();
+                    }
+                    black_box(filter);
+                },
+                BatchSize::LargeInput,
+            );
+        });
+    }
+    group.finish();
+}
+
+criterion_group!(benches, compare, updates);
 criterion_main!(benches);
