@@ -14,8 +14,6 @@ pub struct ParticleFilter<T: RealField = f64> {
     /// State samples, one per column.
     #[getset(get = "pub")]
     particles: DMatrix<T>,
-    /// Normalized posterior weights.
-    #[getset(get = "pub")]
     weights: Vec<T>,
     log_weights: Vec<T>,
     particle_workspace: DMatrix<T>,
@@ -41,6 +39,11 @@ impl<T: RealField + Copy> ParticleFilter<T> {
             log_weights: alloc::vec![weight.ln(); count],
             weight_workspace: alloc::vec![T::zero(); count],
         })
+    }
+
+    /// Normalized posterior weights.
+    pub fn weights(&self) -> &[T] {
+        &self.weights
     }
 
     /// Propagates each sample into a reusable output slice of the same length.
